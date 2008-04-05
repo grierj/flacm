@@ -1,0 +1,307 @@
+#!/usr/bin/ruby -w
+#
+# FLA Configuration Management (FLACM).  A sane alternative to CFengine.
+#
+# This file is the FLACM client.  Currently it runs with no options and
+# connects based on the information presented in the global variables below.
+# Someday it will be a magical and wonderful experience.  Currently it's a bit
+# like pulling teeth from a crocodile with a rusty pair of pliers and a
+# hammer.  Sure you can knock him out and the pliers are better then nothing,
+# but it's definitely not a tranquilizer rifle and a full set of dental tools.
+#
+# Sometimes, the crocodile dies.  And I think that's as far as I can take this
+# metaphor.  This file should be running constantly in the background and is
+# kicked off via init-flacm (which runs in init) and config-flacm (which
+# verifies the environment).  Please don't kill this process.  You can run it
+# by hand to verify that it works.  Debugging output comes on when the process
+# senses a tty.
+#
+# If you need to stop FLACM from doing things (your changes are being
+# overwritten) then either commit your changes to your source repository
+# or touch /var/flacm/.ignore.  This will keep flacm from doing... stuff.
+#
+# Make sure you let sysops know when you do this and make sure the changes
+# that you make get put back into FLACM.
+#
+# Copyright:: Copyright 2006, Responsys, Inc.
+# Original Author:: Grier Johnson <gjohnson@responsys.com>
+#
+#    This file is part of FLACM.
+#
+#    FLACM is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    FLACM is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with Foobar.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Last modification:: $Date: 2008-03-19 16:12:24 -0700 (Wed, 19 Mar 2008) $
+
+# Set a good path
+ENV['PATH']='/bin:/sbin:/usr/bin:/usr/sbin:/opt/bin:/opt/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/bin:/usr/local/sbin:/usr/sfw/bin'
+
+require 'yaml'
+
+# look for flacm configs in a variety of places.  The closer to the "right"
+# place you get (for a redhat-ish environment) the higher precedent that
+# configuration takes (if there are multiple).
+#
+flacm_conf = Hash.new
+found_a_conf = false
+conf_path = ['/opt/flacm/flacm.conf','/var/flacm/flacm.conf','/etc/flacm.conf',\
+             '/etc/sysconfig/flacm.conf']
+conf_path.each do |location|
+  if File.exists?(location)
+    flacm_conf.merge!(YAML.load_file(location)) and found_a_conf = true
+  end
+end
+
+# Defaults, please edit flacm.conf for site specific configurations as FLACM
+# can and will change these variables during updates.
+flacm_conf['prefix_dir'] ||= '/opt/flacm'
+flacm_conf['bin_dir'] ||= "#{flacm_conf['prefix_dir']}/bin"
+flacm_conf['lib_dir'] ||= "#{flacm_conf['prefix_dir']}/lib"
+flacm_conf['state_dir'] ||= "#{flacm_conf['prefix_dir']}/var"
+flacm_conf['log_dir'] ||= "#{flacm_conf['prefix_dir']}/log"
+flacm_conf['data_source'] ||= 'rsync://flacm/flacm'
+flacm_conf['roles_source'] ||= 'rsync://flacm/flacm/ROLES/roles.yaml'
+flacm_conf['retry'] ||= 600
+flacm_conf['reboot'] ||= 24
+flacm_conf['ignore_file'] ||= "#{flacm_conf['state_dir']}/.ignore"
+flacm_conf['reboot_file'] ||= "#{flacm_conf['state_dir']}/.reboot"
+flacm_conf['debug_log'] ||= "#{flacm_conf['log_dir']}/flacm.log"
+flacm_conf['error_log'] ||= "#{flacm_conf['log_dir']}/flacm_error.log"
+flacm_conf['pidfile'] ||= "#{flacm_conf['state_dir']}/flacm.pid"
+flacm_conf['run_once'] ||= false
+flacm_conf['part_as_whole'] ||= false
+flacm_conf['use_fqdn'] ||= false
+flacm_conf['debug'] ||= 0
+
+# Tell the front end where to find the libraries according to the conf file
+$:.push(flacm_conf['lib_dir'],'/opt/lib/ruby')
+
+require 'flacm'
+require 'responsys/file'
+
+# Now onto the good stuff... command line argument parsing
+options = FLACM::Config::CLI.parse(ARGV)
+
+if options.status
+  FLACM.status(flacm_conf['ignore_file'],options.quiet)
+end
+
+# If they just want to set the ignore flag, do that and then exit
+begin
+  if options.ignore and options.no_ignore
+    STDERR.print 'You set the ignore and no ignore flag at the same time.'
+    exit 1
+  elsif options.ignore
+    FLACM.stop(flacm_conf['ignore_file'])
+    exit 0
+  elsif options.no_ignore
+    FLACM.start(flacm_conf['ignore_file'])
+    exit 0
+  end
+rescue Errno::EACCES
+  puts "You have insufficient priviledges to control FLACM.  Try using sudo?"
+  exit 1
+end
+
+# The nature of flacm requires that it be run by the root user.  For now
+# we'll do this the easy way by checking to see that the effective UID is
+# 0
+# This needs to be done AFTER base user command (status, ignore, etc).
+#
+unless Process.euid.eql?(0)
+  STDERR.puts "You must be root to run this process"
+  exit 1
+end
+
+# Set the debug level, command line arg takes precedent
+if options.verbose > 0
+  FLACM.debug_level(options.verbose)
+else
+  FLACM.debug_level(flacm_conf['debug'])
+end
+
+# Set quiet or normal mode
+if options.quiet
+  FLACM.debug(3,"Entering Quiet Mode")
+  unless File.directory?(File.dirname(flacm_conf['debug_log']))
+    FileUtils.mkdir_p(File.dirname(flacm_conf['debug_log']))
+  end
+  STDOUT.reopen(File.open(flacm_conf['debug_log'],'w'))
+  unless File.directory?(File.dirname(flacm_conf['error_log']))
+    FileUtils.mkdir_p(File.dirname(flacm_conf['error_log']))
+  end 
+  STDERR.reopen(File.open(flacm_conf['error_log'],'w'))
+end
+
+if options.daemon
+  FLACM.debug(3,"Running FLACM as a daemon")
+  flacm_conf['run_once'] = false
+else
+  FLACM.debug(3,"Running FLACM in one-shot mode")
+  flacm_conf['run_once'] = true
+  unless options.force
+    if File.exists?(flacm_conf['ignore_file'])
+      puts "FLACM has been set to \"ignore\" mode and won't run without --force"
+      exit 1
+    end
+  end
+end
+
+# Mention to a user on the command line that they don't have a configuration
+# file.
+unless found_a_conf
+  unless options.quiet
+    puts "WARNING: No configuration file found. Using default configuration \
+values"
+  end
+end
+
+unless options.source.empty?
+  flacm_conf['data_source'] = options.source
+end
+
+unless options.roles_source.empty?
+  flacm_conf['roles_source'] = options.roles_source
+end
+
+# Initialize my_host
+this_host = FLACM::HostInfo.new
+if flacm_conf['use_fqdn']
+  my_host = this_host.fqdn
+else
+  my_host = this_host.host
+end
+FLACM.debug(2,"Using host #{my_host}")
+my_domain = this_host.domain
+my_os = this_host.os
+my_distro = this_host.distro
+my_version = this_host.version
+
+if options.roles_to_run.length > 0
+  begin
+    my_pid = Responsys::File.create_pid(flacm_conf['pidfile'])
+  rescue Errno::EBUSY
+    puts "Another instance of FLACM is already running."
+    exit 1
+  else
+    tell_about_force=false
+    options.roles_to_run.each do |role|
+      unless options.force
+        functions = FLACM::Roles::Function.find(flacm_conf['roles_source'])
+        host_functions = FLACM::Roles::Function.parse(functions, my_host)
+        FLACM.debug(3,"Functions for this host are: \
+#{host_functions.join(' ')}")
+        orig_role = role
+        role = nil unless host_functions.include?(role)
+      end
+      unless role.nil?
+        one_time_role = FLACM::Roles::Function.new(flacm_conf['data_source'],
+                                            role,flacm_conf['part_as_whole'])
+        one_time_role.run
+      else
+        tell_about_force=true
+        FLACM::Log.warning("This host is not configured to use the role \"\
+#{orig_role}\".")
+      end
+    end
+    if tell_about_force
+      puts "Use -F to force FLACM to install an unconfigured role."
+      exit 1
+    else
+      exit 0
+    end
+  ensure
+    unless my_pid.nil?
+      Responsys::File.remove_pid(my_pid)
+    end
+  end
+end
+    
+# Setting up default umask
+File.umask(0022)
+ 
+while true
+  # Ignore switch, do nothing if this file exists, the sleep keeps FLACM
+  # from running this check over and over consuming resources for no reason
+  # since we can wait a second for flacm to resume.
+  unless options.force
+    while File.exists?(flacm_conf['ignore_file'])
+      sleep 1
+    end
+  end
+  begin
+    my_pid = Responsys::File.create_pid(flacm_conf['pidfile'])
+  rescue Errno::EBUSY
+    if flacm_conf['run_once']
+      puts "Another instance of FLACM is already running."
+      exit 1
+    else
+      sleep 60
+      retry
+    end
+  else
+    # If it's time to reboot we touch the reboot file, if not, we go on our
+    # merry way.
+    FLACM.reboot(flacm_conf['reboot'], flacm_conf['reboot_file'], \
+                 flacm_conf['state_dir'])
+    # OS Configuration placeholder
+    FLACM.debug(3, "Processing OS: #{my_os}")
+    os_role = FLACM::Roles::OS.new(flacm_conf['data_source'], my_os, my_distro, 
+                                   my_version, flacm_conf['part_as_whole'])
+    os_role.run
+    # Domain Configuration placeholder
+    FLACM.debug(3, "Processing domain: #{my_domain}")
+    domain_role = FLACM::Roles::Domain.new(flacm_conf['data_source'], my_domain,
+                                           flacm_conf['part_as_whole'])
+    domain_role.run
+    
+    # Since a system can have multiple functions there's more logic in
+    # getting a looping through all of them.
+    functions = FLACM::Roles::Function.find(flacm_conf['roles_source'])
+    FLACM.debug(3, "All functions: " + functions.to_a.join(' '))
+    host_functions = FLACM::Roles::Function.parse(functions,my_host)
+    FLACM.debug(3, "This hosts functions: " + host_functions.to_s)
+    host_functions.each do |function|
+      FLACM.debug(3, "New function role for #{function}")
+      functional_role = FLACM::Roles::Function.new(flacm_conf['data_source'], 
+                                       function, flacm_conf['part_as_whole'])
+      functional_role.run
+    end
+  
+    # Host Configuration
+    # Has anyone else noticed all the pieces here that I should be
+    # functionalizing?  Anyone?  I know I have...
+    FLACM.debug(3, "Processing hostname: #{my_host}")
+    begin
+      current_hostname = FLACM::Roles::Host.new(flacm_conf['data_source'], 
+                                     my_host, flacm_conf['part_as_whole'])
+      current_hostname.run
+    # We'll get a Errno::ENOENT if there's no temp directory to cd into, which
+    # will happen if we don't specify a host-level config for every host, which
+    # we don't want to do
+    # Now that we give a damn about executed things failing rsync will also
+    # fail if there's not a data source for each host.
+    rescue Errno::ENOENT,FLACM::Data::Exec::FailedScriptError
+      FLACM.debug(2, "No host config for #{my_host}")
+    end
+  ensure
+    unless my_pid.nil?
+      Responsys::File.remove_pid(my_pid)
+    end
+  end
+  if flacm_conf['run_once']
+    exit 0
+  else
+    sleep flacm_conf['retry']
+  end
+end

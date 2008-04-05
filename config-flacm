@@ -1,0 +1,165 @@
+#!/bin/sh
+#
+# The "Phase 1" or OS Configuration phase of flacm.  Still in bourne shell
+# because we don't know where we are yet.
+#
+#    This file is part of FLACM.
+#
+#    FLACM is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    FLACM is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with Foobar.  If not, see <http://www.gnu.org/licenses/>.
+#
+OS=`uname -s`
+RELEASE=`uname -r`
+DISTRO=''
+VERSION=''
+FLACM_STATE_DIR=/var/flacm
+# You'll want this to match your RPM or tarball or whatever
+FLACM_DATA_DIR=$FLACMDIR
+FLACM_LIB_DIR=/opt/lib/ruby
+FLACM_BIN="$FLACM_DATA_DIR/flacm -I"
+# If you want to see stuff, make this non-zero
+DEBUG=0
+# Redirect STDERR and STDOUT to a log file
+if [ -d $FLACM_STATE_DIR ]; then
+  exec 1>$FLACM_STATE_DIR/config-flacm.log 2>&1
+else
+  exec 1>/tmp/config-flacm.log 2>&1
+fi
+
+run_flacm () {
+  export OS
+  export RELEASE
+  export DISTRO
+  export VERSION
+  exec $FLACM_BIN
+}
+
+yum_install () {
+  yum clean metadata
+  yum -y install flacm
+  rpm -q flacm
+  if [ $? -ne 0 ]; then
+    return 1
+  else
+    run_flacm
+  fi
+}
+
+rpm_install () {
+  rpm -q flacm
+  if [ $? -ne 0 ]; then
+    rpm -i $GOLDSERV/flacm.rpm
+  else
+    rpm -U $GOLDSERV/flacm.rpm
+  fi
+  rpm -q flacm
+  if [ $? -ne 0 ]; then
+    return 1
+  else
+    run_flacm
+  fi
+}
+
+sun_pkg_install () {
+  $WGET $GOLDSERV/flacm-sun.pkg
+  pkginfo |grep flacm
+  if [ $? -ne 0 ]; then
+    return 1
+  else
+    run_flacm
+  fi
+}
+
+tarball_install () {
+  cd $FLACM_DATA_DIR
+  $WGET $GOLDSERV/flacm.tar.gz
+  gunzip -f flacm.tar.gz
+  tar -xf flacm.tar
+  cp -rf lib/* $FLACM_LIB_DIR
+  diff -q lib/flacm.rb $FLACM_LIB_DIR/flacm.rb
+  if [ $? -ne 0 ]; then
+    return 1
+  else
+    rm -rf lib
+    rm -f flacm.tar
+    run_flacm
+  fi
+}
+
+make_dir () {
+  if [ -z $1 ]; then
+    echo "Usage: make_dir <dir>"
+  else
+    if [ ! -d $1 ]; then
+      if [ -e $1 ]; then
+        rm -f $1
+        if [ $? -ne 0 ]; then
+          echo "Could not remove non-directory file: $1"
+          return 1
+        fi
+      fi
+      mkdir -p $1
+      if [ $? -ne 0 ]; then
+        echo "Could not create the directory: $1"
+        return 1
+      fi
+    fi
+  fi
+}
+
+debug_print () {
+  if [ -z "$1" ]; then
+    echo "Usage: debug_print <message>"
+  else
+    if [ $DEBUG -ne 0 ]; then
+      echo $1
+    fi
+  fi
+}
+ 
+# Logs and state files
+debug_print "Making FLACM State Dir: $FLACM_STATE_DIR"
+make_dir $FLACM_STATE_DIR
+# Binaries and data
+debug_print "Making FLACM Data Dir: $FLACM_DATA_DIR"
+make_dir $FLACM_DATA_DIR
+# Library files
+debug_print "Making FLACM Lib Dir: $FLACM_LIB_DIR"
+make_dir $FLACM_LIB_DIR
+
+if [ $OS = "Linux" ]; then
+  echo $RELEASE | grep EL
+  if [ $? -eq 0 ]; then
+    DISTRO="CENTOS"
+    yum_install
+  elif [ ! -z `echo $RELEASE | grep FC` ]; then
+    DISTRO="FEDORA"
+    yum_install
+  else
+    DISTRO="OTHER"
+    rpm_install
+  fi
+elif [ $OS = "SunOS" ]; then
+  VERSION=$RELEASE
+  sun_pkg_install
+else
+  OS="OTHER"
+  tarball_install
+fi
+
+# Try the tarball install one more time if we failed
+if [ $? -ne 0 ]; then
+  tarball_install
+  # We only get here if we can't get to the exec
+  exit 1
+fi
