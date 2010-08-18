@@ -105,9 +105,7 @@ module FLACM
           opts.banner = "FLACM Likes Automation and Configuration Management\n"
           opts.banner << "\n"
           opts.banner << "FLACM is an in-house configuration management agent "
-          opts.banner << "that can run from init or\ncron.  For more "
-          opts.banner << "information please see:\n"
-          opts.banner << "http://wiki.corp.responsys.com/OPS/Sysops/Services/FLACM/AdminGuide\n"
+          opts.banner << "that can run from init or\ncron."
           opts.banner << "\n"
           opts.banner << "Usage: #{File.basename($0)} [options] \
 [<role1> <role2> <roleN>]"
