@@ -1,5 +1,6 @@
 ```
-This design doc is from the original prototype, various aspects will be discarded and new concepts will be added as time goes on.  This banner will be updated when the design is finalized
+This design doc is from the original prototype, various aspects will be discarded and new concepts will be 
+added as time goes on.  This banner will be updated when the design is finalized
 ```
 
 # FLACM Design Doc
