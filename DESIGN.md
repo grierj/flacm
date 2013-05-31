@@ -1,3 +1,7 @@
+```
+This design doc is from the original prototype, various aspects will be discarded and new concepts will be added as time goes on.  This banner will be updated when the design is finalized
+```
+
 # FLACM Design Doc
 ## Goals
 
@@ -166,73 +170,78 @@ The scripts directory holds a number of specifically named scripts that are kick
 
 #### Phase 3 - File extensions
 
-    In order to allow for limited scripting, files placed into configuration management must have one of two file extensions. Files that are the whole configuration file, in that they should completely replace what's already on the system end with a .whole. Files that should be appended to and existing file should end with .part.
+In order to allow for limited scripting, files placed into configuration management must have one of two file extensions. Files that are the whole configuration file, in that they should completely replace what's already on the system end with a .whole. Files that should be appended to and existing file should end with .part.
 
-    A practical example of this would be to have an OS level /etc/sudoers.whole file that replaced the sudoers file on every box of that OS level with a sudoers that gave access to root and the wheel group (or OS equivalent). Then the DOMAIN level would append access (sudoers.part) for the admins of that domain. The ROLES level would then add access for the operators of each of those roles with another sudoers.part. Finally, if the system hosted some sort of one-off script the HOST level would add sudo access for an operator to run that one-off script just for that host.
+A practical example of this would be to have an OS level /etc/sudoers.whole file that replaced the sudoers file on every box of that OS level with a sudoers that gave access to root and the wheel group (or OS equivalent). Then the DOMAIN level would append access (sudoers.part) for the admins of that domain. The ROLES level would then add access for the operators of each of those roles with another sudoers.part. Finally, if the system hosted some sort of one-off script the HOST level would add sudo access for an operator to run that one-off script just for that host.
 
-    If a directory contains a {file}.whole AND and {file}.part only the {file}.whole will be used and a message to /var/log/flacm/phase3.log will be recorded.
-    Phase 3 - Scripts
+If a directory contains a {file}.whole AND and {file}.part only the {file}.whole will be used and a message to /var/log/flacm/phase3.log will be recorded.
 
-    Additionally each FLACM subsection contains a "scripts" folder. There are 3 acceptable scripts for each section except roles, which has 5. The three main scripts are:
-        /flacm/.../scripts/pre
-        /flacm/.../scripts/fix
-        /flacm/.../scripts/post 
+#### Phase 3 - Scripts
 
-    The "pre" script is run after the files are downloaded locally but before any files are copied anywhere else. The pre script is where FLACM should be used to install RPM dependencies (from a repository, not FLACM) and basically get the server ready to take the configuration that will be put in place.
+Additionally each FLACM subsection contains a "scripts" folder. There are 3 acceptable scripts for each section except roles, which has 5. The three main scripts are:
 
-    The "fix" script is immediately after the pre script. The "fix" script creates a false root, copies all the files over to it and chroots into that directory (for example it might run chroot /falseroot/OS/CentOS/4.2/ after copying the files from /flacm/OS/CentOS/4.2/ to that directory. This is the right place to modify permissions. The point behind this is that many data sources will flatten the permissions on a file to a single user and group and potentially even a single read/write permission setup. Creating a false root allows permissions to be set up first and then copy the files over.
+```
+/flacm/.../scripts/pre
+/flacm/.../scripts/fix
+/flacm/.../scripts/post 
+```
 
-    The "post" script is run after all files are copied over to the appropriate places. This script should clean up any temporary files that FLACM created and integrate any new configuration files (like running "newaliases").
+The "pre" script is run after the files are downloaded locally but before any files are copied anywhere else. The pre script is where FLACM should be used to install RPM dependencies (from a repository, not FLACM) and basically get the server ready to take the configuration that will be put in place.
 
-    The roles section has two more scripts:
-        /flacm/.../scripts/install
-        /flacm/.../scripts/uninstall 
+The "fix" script is immediately after the pre script. The "fix" script creates a false root, copies all the files over to it and chroots into that directory (for example it might run chroot /falseroot/OS/CentOS/4.2/ after copying the files from /flacm/OS/CentOS/4.2/ to that directory. This is the right place to modify permissions. The point behind this is that many data sources will flatten the permissions on a file to a single user and group and potentially even a single read/write permission setup. Creating a false root allows permissions to be set up first and then copy the files over.
 
-    Roles are the most dynamic property of a server. A server that is an LDAP server will more regularly become a non-LDAP server then it will move out of production or become a different OS. Because of this, the ability to remove a role is important. Also, roles are generally more complicated then other types of configuration and there is often tasks that need to be done once, but never again. For example if LDAP is installed the server no longer needs to point to an external LDAP server, but this only needs to be done once, so it doesn't belong in the "pre" script.
+The "post" script is run after all files are copied over to the appropriate places. This script should clean up any temporary files that FLACM created and integrate any new configuration files (like running "newaliases").
 
-    Each time a server figures out its roles it checks for /etc/flacm/roles.conf and checks to see if there are any new roles or removed roles. If there are new roles it runs the install script (after the fix script but before moving any config files). If there are any removed roles it runs the uninstall script from that role.
+The roles section has two more scripts:
+
+```
+/flacm/.../scripts/install
+/flacm/.../scripts/uninstall 
+```
+
+Roles are the most dynamic property of a server. A server that is an LDAP server will more regularly become a non-LDAP server then it will move out of production or become a different OS. Because of this, the ability to remove a role is important. Also, roles are generally more complicated then other types of configuration and there is often tasks that need to be done once, but never again. For example if LDAP is installed the server no longer needs to point to an external LDAP server, but this only needs to be done once, so it doesn't belong in the "pre" script.
+
+Each time a server figures out its roles it checks for /etc/flacm/roles.conf and checks to see if there are any new roles or removed roles. If there are new roles it runs the install script (after the fix script but before moving any config files). If there are any removed roles it runs the uninstall script from that role.
 
 #### Phase 3 - Workflow
-        Check for .ignore file, if present, do nothing, exit successfully
-        Check for .reboot file, if present, download the new version and exec to it.
-        Determine roles and domains
-        Download OS, Domain, Roles, and Host configs and scripts from FLACM repository.
-        Run OS pre
-        Run OS fix
-        scrub false root, remove any {file}.part if a {file}.whole exists
-        copy whole files into place, append part files to existing configs
-        Run OS post
-        repeat previous 5 steps for Domain, Roles, Host
-        During the Roles portion:
-            If there are any removed roles, run uninstall
-            If there are any new roles, run the pre, then fix, then install 
-        Check to see if Phase 3 is in cron, schedule if not
-        Check to see if there is a /etc/flacm/.reboot file. Reboot if so.
-        Check to see if the reboot time has been reached, Reboot if so. 
-    Phase 3 - Misc Requirements
+* Check for .ignore file, if present, do nothing, exit successfully
+* Check for .reboot file, if present, download the new version and exec to it.
+* Determine roles and domains
+* Download OS, Domain, Roles, and Host configs and scripts from FLACM repository.
+* Run OS pre
+* Run OS fix
+* scrub false root, remove any {file}.part if a {file}.whole exists
+* copy whole files into place, append part files to existing configs
+* Run OS post
+* repeat previous 5 steps for Domain, Roles, Host
 
-    The phase 3 script should upgrade itself. On a regular basis it should check to see if there is a new version of the script and download it if there is. After a download it should run the new script immediately.
+During the Roles portion:
+* If there are any removed roles, run uninstall
+* If there are any new roles, run the pre, then fix, then install 
+* Check to see if Phase 3 is in cron, schedule if not
+* Check to see if there is a /etc/flacm/.reboot file. Reboot if so.
+* Check to see if the reboot time has been reached, Reboot if so. 
 
-    The phase 3 script should check to see if it's in cron. If it is not then it should schedule itself.
+#### Phase 3 - Misc Requirements
 
-    The phase 3 script should have a set time that it "reboots" or basically reruns the bootstrap program (in order to get the most current version). The code should also check for a /etc/flacm/.reboot file and reboot immediately if present.
-    Misc Requirements
+The phase 3 script should upgrade itself. On a regular basis it should check to see if there is a new version of the script and download it if there is. After a download it should run the new script immediately.
 
-    Starting with Phase 1 all scripts should check for an /etc/flacm/.ignore file. If present the scripts do nothing. The logic behind this is that if the FLACM central server is down local changes need to be made, FLACM should not overwrite the changes when the server comes back up. This allows for an extended period of time to get a change put into FLACM.
-    Toolkit
+The phase 3 script should check to see if it's in cron. If it is not then it should schedule itself.
 
-    The FLACM Toolkit is a collection of scripts that help make FLACM more effective. At the initial roll out there will be a script to help deploy the bootstrap script to remote machines.
+The phase 3 script should have a set time that it "reboots" or basically reruns the bootstrap program (in order to get the most current version). The code should also check for a /var/flacm/.reboot file and reboot immediately if present.
 
-    Other scripts that will be written as time and resources allow are:
+### Misc Requirements
 
-        FLACM Log Checker - A tool to check the remote FLACM logs and return either raw data or an aggregated report.
-    Limitations
+Starting with Phase 1 all scripts should check for an /var/flacm/.ignore file. If present the scripts do nothing. The logic behind this is that if the FLACM central server is down local changes need to be made, FLACM should not overwrite the changes when the server comes back up. This allows for an extended period of time to get a change put into FLACM.
 
-        This is not a YUM replacement! Do not store RPMs in FLACM. 
-    Monitoring
+### Toolkit
 
-    For initial roll out e-mail will be sent. Moving forward a FLACM agent should be written that can be queried about status.
-    Roll Out
+The FLACM Toolkit is a collection of scripts that help make FLACM more effective. At the initial roll out there will be a script to help deploy the bootstrap script to remote machines.
 
-    FLACM will be rolled out with the initial load test infrastructure at the new data center. Ideally FLACM will cause no downtime for roll out as it lives in userspace.
+### Limitations
 
+This is not a YUM replacement! Do not store RPMs in FLACM. 
+
+### Monitoring
+
+A REST interface will serve a a health-check for the master.  As we become more sophisticated statistics about clients and their last check-in time, roles, etc will be made available.
