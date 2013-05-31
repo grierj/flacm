@@ -10,8 +10,8 @@ Gem::Specification.new do |spec|
   spec.email         = ["grierj@gmail.com"]
   spec.description   = %q{A Modular configuration management framework}
   spec.summary       = %q{FLA Configuration Management}
-  spec.homepage      = ""
-  spec.license       = "MIT"
+  spec.homepage      = "https://github.com/grierj/flacm"
+  spec.license       = "GPLv3"
 
   spec.files         = `git ls-files`.split($/)
   spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
