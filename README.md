@@ -56,6 +56,8 @@ In addition to that FLACM will start simple and allow for more complicated actio
 
 The configuration management software will be a multiphase setup that takes inspiration from computer boot strapping. Each phase will get progressively more complicated until the system runs out of phases. The basic flow of the configuration management software looks like this:
 
+![Bootstrap Flow](https://github.com/grierj/flacm/blob/master/docs/config-bootstrap.gif?raw=true)
+
 The details of this design can be broken into discussing the different phases of the configuration management itself and the toolkit that will be provided with FLACM to help deal with things like the bootstrap script deployment and FLACM log monitoring.
 
 ### Bootstrap Phase
